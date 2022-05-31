@@ -2,10 +2,19 @@ import * as os from 'os';
 import * as fs from 'fs';
 
 //Solana
-import { Commitment, Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import { 
+    Commitment, 
+    Connection, 
+    Keypair, 
+    PublicKey, 
+    Transaction 
+} from '@solana/web3.js';
 
 //Serum
-import { Market, OpenOrders } from '@project-serum/serum';
+import { 
+    Market, 
+    OpenOrders, 
+} from '@project-serum/serum';
 
 //Mango
 import {
@@ -24,12 +33,13 @@ const cluster = 'mainnet';
 const group = 'mainnet.1';
 const myMangoAccountAddress = 'EsZWvt5hYSVYDp81374HkQpVvG7NctiTzzVpmkA17YXf';
 
-let payer : Keypair
+let connection : Connection; //Solana RPC Connection
+
+let payer : Keypair //Solana KeyPair
 let client : MangoClient;
 let mangoGroup : MangoGroup;
 let mangoAccount : MangoAccount;
-let connection : Connection;
-let groupConfig : GroupConfig | undefined;
+let groupConfig : GroupConfig | undefined; 
 
 
 async function init() {
@@ -48,7 +58,7 @@ async function init() {
 
   const mangoGroupKey = groupConfig.publicKey;
   const mangoProgramPk = new PublicKey(clusterData.mangoProgramId);
-  const myMangoAccountPubKey = new PublicKey(myMangoAccountAddress);
+  const myMangoAccountPk = new PublicKey(myMangoAccountAddress);
   
   const serumProgramPk = new PublicKey(clusterData.serumProgramId);
   
@@ -56,7 +66,7 @@ async function init() {
   connection = new Connection(clusterUrl, 'processed' as Commitment);
   
   client = new MangoClient(connection, mangoProgramPk);
-  mangoAccount = await client.getMangoAccount(myMangoAccountPubKey, serumProgramPk);
+  mangoAccount = await client.getMangoAccount(myMangoAccountPk, serumProgramPk);
   mangoGroup = await client.getMangoGroup(mangoGroupKey);
 
   payer = Keypair.fromSecretKey(
@@ -72,7 +82,7 @@ async function init() {
   );
 }
 
-async function buyPerp(sym : string, price, amount) {
+async function getPerpMarket(sym : string) {
     const perpMarketConfig = getMarketByBaseSymbolAndKind(
         groupConfig,
         sym,
@@ -80,39 +90,29 @@ async function buyPerp(sym : string, price, amount) {
     );
     console.log(perpMarketConfig);
 
-    const perpMarket = await mangoGroup.loadPerpMarket(
+    return (await mangoGroup.loadPerpMarket(
         connection, 
         perpMarketConfig.marketIndex,
         perpMarketConfig.baseDecimals,
         perpMarketConfig.quoteDecimals
-    );
-
-    await client.placePerpOrder2(
-        mangoGroup, 
-        mangoAccount,
-        perpMarket,
-        payer,
-        'buy',
-        price,
-        amount,
-    );
+    ));
 }
 
-async function getSerumMarket(groupConfig : GroupConfig, sym : string) {
-    
+async function getSerumSpotMarket(sym : string) {
     const marketData = groupConfig.spotMarkets.find((m) => {
         return m.baseSymbol === sym;
     });
     const marketProgramPk = new PublicKey(marketData.publicKey);
     const serumProgramPk = new PublicKey(groupConfig.serumProgramId);
     return (await Market.load(connection, marketProgramPk, {}, serumProgramPk));
-
 }
 
 async function main() {
   await init();
-  const market = await getSerumMarket(groupConfig, "SOL");
+  const market = await getSerumSpotMarket("SOL");
   console.log(market);
+  const perpMarket = await getPerpMarket("SOL");
+  console.log(perpMarket);
   //console.log(groupIds);
   //buyPerp("SOL", 47, .1);
 
