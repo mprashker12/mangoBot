@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import {
   Config,
   MangoClient,
-  getMarketByBaseSymbolAndKind,
   MangoGroup,
   MangoAccount,
   GroupConfig,
+  getMarketByBaseSymbolAndKind
 } from '@blockworks-foundation/mango-client';
 
 import { Commitment, Connection, Keypair, PublicKey } from '@solana/web3.js';
@@ -31,12 +31,10 @@ async function init() {
 
   
   const config = new Config(ids);
-  const groupIds =
-  config.getGroup(cluster, group) ??
-  (() => {
-    throw new Error(`Group ${group} not found`);
-  })();
-  
+  const groupIds = config.getGroup(cluster, group)
+  if(!groupIds) {
+      throw new Error('Group was not able to be constructed from ids');
+  }
   groupConfig = config.getGroup(cluster, group);
   if (!groupConfig) {
       throw new Error("unable to get mango group config");
@@ -73,44 +71,39 @@ async function init() {
     ),
   );
 
-
-  // const spotMarketConfig = getMarketByBaseSymbolAndKind(
-  //   groupConfig,
-  //   'SOL',
-  //   'perp',
-  // );
-
-  // const perpMarket = await mangoGroup.loadPerpMarket(
-  //   connection,
-  //   spotMarketConfig.marketIndex,
-  //   spotMarketConfig.baseDecimals,
-  //   spotMarketConfig.quoteDecimals,
-  // );
-
-  // const bids = await perpMarket.loadBids(connection);
-  // console.log(bids);
-
-
-  // await client.placePerpOrder2(
-  //   mangoGroup,
-  //   mangoAccount,
-  //   perpMarket,
-  //   payer,
-  //   'buy',
-  //   47,
-  //   .2,
-  // );
-
 }
 
-async function buyPerp() {
+async function buyPerp(sym : string, price, amount) {
+    const perpMarketConfig = getMarketByBaseSymbolAndKind(
+        groupConfig,
+        sym,
+        'perp'
+    );
+    console.log(perpMarketConfig);
+
+    const perpMarket = await mangoGroup.loadPerpMarket(
+        connection, 
+        perpMarketConfig.marketIndex,
+        perpMarketConfig.baseDecimals,
+        perpMarketConfig.quoteDecimals
+    );
+
+    await client.placePerpOrder2(
+        mangoGroup, 
+        mangoAccount,
+        perpMarket,
+        payer,
+        'buy',
+        price,
+        amount,
+    );
 
 }
 
 async function main() {
   await init();
   console.log(mangoGroup);
-
+  buyPerp("SOL", 47, .1);
 }
 
 main();
