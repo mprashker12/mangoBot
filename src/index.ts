@@ -1,16 +1,21 @@
 import * as os from 'os';
 import * as fs from 'fs';
+
+//Solana
+import { Commitment, Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
+
+//Serum
+import { Market, OpenOrders } from '@project-serum/serum';
+
+//Mango
 import {
   Config,
   MangoClient,
   MangoGroup,
   MangoAccount,
   GroupConfig,
-  getMarketByBaseSymbolAndKind
+  getMarketByBaseSymbolAndKind,
 } from '@blockworks-foundation/mango-client';
-
-import { Commitment, Connection, Keypair, PublicKey } from '@solana/web3.js';
-import { Market, OpenOrders } from '@project-serum/serum';
 
 import ids from '../ids.json';
 
@@ -28,16 +33,10 @@ let groupConfig : GroupConfig | undefined;
 
 
 async function init() {
-
-  
   const config = new Config(ids);
-  const groupIds = config.getGroup(cluster, group)
-  if(!groupIds) {
-      throw new Error('Group was not able to be constructed from ids');
-  }
   groupConfig = config.getGroup(cluster, group);
   if (!groupConfig) {
-      throw new Error("unable to get mango group config");
+      throw new Error('unable to read Mango group config file');
   }
   const clusterData = ids.groups.find((g) => {
     return g.name == group && g.cluster == cluster;
@@ -48,15 +47,16 @@ async function init() {
 
 
   const mangoGroupKey = groupConfig.publicKey;
-  const mangoProgramIdPk = new PublicKey(clusterData.mangoProgramId);
-  const serumProgramIdPk = new PublicKey(clusterData.serumProgramId);
-  const clusterUrl = ids.cluster_urls[cluster];
+  const mangoProgramPk = new PublicKey(clusterData.mangoProgramId);
   const myMangoAccountPubKey = new PublicKey(myMangoAccountAddress);
   
- 
+  const serumProgramPk = new PublicKey(clusterData.serumProgramId);
+  
+  const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
   connection = new Connection(clusterUrl, 'processed' as Commitment);
-  client = new MangoClient(connection, mangoProgramIdPk);
-  mangoAccount = await client.getMangoAccount(myMangoAccountPubKey, serumProgramIdPk);
+  
+  client = new MangoClient(connection, mangoProgramPk);
+  mangoAccount = await client.getMangoAccount(myMangoAccountPubKey, serumProgramPk);
   mangoGroup = await client.getMangoGroup(mangoGroupKey);
 
   payer = Keypair.fromSecretKey(
@@ -70,7 +70,6 @@ async function init() {
       ),
     ),
   );
-
 }
 
 async function buyPerp(sym : string, price, amount) {
@@ -97,13 +96,26 @@ async function buyPerp(sym : string, price, amount) {
         price,
         amount,
     );
+}
+
+async function getSerumMarket(groupConfig : GroupConfig, sym : string) {
+    
+    const marketData = groupConfig.spotMarkets.find((m) => {
+        return m.baseSymbol === sym;
+    });
+    const marketProgramPk = new PublicKey(marketData.publicKey);
+    const serumProgramPk = new PublicKey(groupConfig.serumProgramId);
+    return (await Market.load(connection, marketProgramPk, {}, serumProgramPk));
 
 }
 
 async function main() {
   await init();
-  console.log(mangoGroup);
-  buyPerp("SOL", 47, .1);
+  const market = await getSerumMarket(groupConfig, "SOL");
+  console.log(market);
+  //console.log(groupIds);
+  //buyPerp("SOL", 47, .1);
+
 }
 
 main();
