@@ -7,13 +7,11 @@ import {
     Connection, 
     Keypair, 
     PublicKey, 
-    Transaction 
 } from '@solana/web3.js';
 
 //Serum
 import {
     Market,
-    OpenOrders,
 } from '@blockworks-foundation/mango-client/node_modules/@project-serum/serum';
 
 //Mango
@@ -31,17 +29,16 @@ import ids from '../ids.json';
 //globals
 const cluster = 'mainnet';
 const group = 'mainnet.1';
-const myMangoAccountAddress = 'EsZWvt5hYSVYDp81374HkQpVvG7NctiTzzVpmkA17YXf';
+const myMangoAccountAddress : string = 'EsZWvt5hYSVYDp81374HkQpVvG7NctiTzzVpmkA17YXf';
 
-let connection : Connection; //Solana RPC Connection
+export let connection : Connection; //Solana RPC Connection
 
 let solAccountKeyPair : Keypair;
-
 
 let client : MangoClient;
 let mangoGroup : MangoGroup;
 let mangoAccount : MangoAccount;
-let groupConfig : GroupConfig | undefined; 
+export let groupConfig : GroupConfig | undefined; 
 
 
 async function init() {
@@ -99,8 +96,8 @@ async function getPerpMarket(sym : string) {
     ));
 }
 
-
-async function getSpotMarket(sym : string) {
+//Wrapped serum spot Market to interfce with Mango APIs.
+async function getMangoSpotMarket(sym : string) {
     const marketInfo = groupConfig.spotMarkets.find((m) => {
         return m.name === sym;
     });
