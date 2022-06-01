@@ -12,9 +12,10 @@ import {
     PublicKey, 
 } from '@solana/web3.js';
 
+//serum
 import {
-    serumSpotMarket
-} from './serum';
+    Market
+} from '@blockworks-foundation/mango-client/node_modules/@project-serum/serum';
 
 //mango
 import {
@@ -26,6 +27,10 @@ import {
   getMarketByBaseSymbolAndKind,
 } from '@blockworks-foundation/mango-client';
 import ids from '../ids.json';
+
+import {
+    mangoSpotMarketMaker
+ } from './mangoSpotMarketMaker';
 
 //solana globals
 let connection : Connection; //Solana RPC Connection
@@ -75,7 +80,7 @@ async function init() {
   )
 }
 
-async function getPerpMarket(sym : string) {
+async function loadMangoPerpMarket(sym : string) {
     const perpMarketConfig = getMarketByBaseSymbolAndKind(
         groupConfig,
         sym,
@@ -90,15 +95,15 @@ async function getPerpMarket(sym : string) {
     ));
 }
 
-async function getSpotMarket(sym : string) {
+async function loadMangoSpotMarket(sym : string) {
     const marketInfo = groupConfig.spotMarkets.find((m) => {
         return m.name === sym;
     });
 
-    return new serumSpotMarket(
-        sym,
+    return Market.load(
         connection,
         marketInfo.publicKey,
+        {},
         groupConfig.serumProgramId
     );
  }
@@ -106,8 +111,14 @@ async function getSpotMarket(sym : string) {
 
 async function main() {
     await init();
-    const market = await getSpotMarket('AVAX/USDC');
-    market.getAsks(10);
+    const spotAVAX = await loadMangoSpotMarket('AVAX/USDC');
+    const AVAXSpotMarketMaker = new mangoSpotMarketMaker(
+        client,
+        connection,
+        spotAVAX
+    );
+    AVAXSpotMarketMaker.showBids(20);
+
     
     // const spotAVAX = await getSpotMarket('AVAX/USDC');
     // client.placeSpotOrder(
@@ -122,7 +133,12 @@ async function main() {
     //     'limit'
     // );
 
-    // const perpBTC = await getPerpMarket('BTC');
+    //  const perpBTC = await loadMangoPerpMarket('BTC');
+    //  let asksB = await perpBTC.loadAsks(connection);
+    //  for(let [price, size] of asksB.getL2(20)) {
+    //      console.log(price, size);
+    //  }
+
     // client.placePerpOrder2(
     //     mangoGroup,
     //     mangoAccount,
