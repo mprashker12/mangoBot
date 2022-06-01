@@ -11,10 +11,10 @@ import {
 } from '@solana/web3.js';
 
 //Serum
-import { 
-    Market, 
-    OpenOrders, 
-} from '@project-serum/serum';
+import {
+    Market,
+    OpenOrders,
+} from '@blockworks-foundation/mango-client/node_modules/@project-serum/serum';
 
 //Mango
 import {
@@ -35,7 +35,9 @@ const myMangoAccountAddress = 'EsZWvt5hYSVYDp81374HkQpVvG7NctiTzzVpmkA17YXf';
 
 let connection : Connection; //Solana RPC Connection
 
-let payer : Keypair //Solana KeyPair
+let solAccountKeyPair : Keypair;
+
+
 let client : MangoClient;
 let mangoGroup : MangoGroup;
 let mangoAccount : MangoAccount;
@@ -69,7 +71,7 @@ async function init() {
   mangoAccount = await client.getMangoAccount(myMangoAccountPk, serumProgramPk);
   mangoGroup = await client.getMangoGroup(mangoGroupKey);
 
-  payer = Keypair.fromSecretKey(
+  solAccountKeyPair = Keypair.fromSecretKey(
     Uint8Array.from(
       JSON.parse(
         process.env.PRIVATE_KEY ||
@@ -79,7 +81,7 @@ async function init() {
           ),
       ),
     ),
-  );
+  )
 }
 
 async function getPerpMarket(sym : string) {
@@ -88,7 +90,6 @@ async function getPerpMarket(sym : string) {
         sym,
         'perp'
     );
-    console.log(perpMarketConfig);
 
     return (await mangoGroup.loadPerpMarket(
         connection, 
@@ -98,24 +99,47 @@ async function getPerpMarket(sym : string) {
     ));
 }
 
-async function getSerumSpotMarket(sym : string) {
-    const marketData = groupConfig.spotMarkets.find((m) => {
-        return m.baseSymbol === sym;
+
+async function getSpotMarket(sym : string) {
+    const marketInfo = groupConfig.spotMarkets.find((m) => {
+        return m.name === sym;
     });
-    const marketProgramPk = new PublicKey(marketData.publicKey);
-    const serumProgramPk = new PublicKey(groupConfig.serumProgramId);
-    return (await Market.load(connection, marketProgramPk, {}, serumProgramPk));
-}
+    
+    return await Market.load(
+        connection,
+        marketInfo.publicKey,
+        undefined,
+        groupConfig.serumProgramId,
+    );
+ }
+
 
 async function main() {
-  await init();
-  const market = await getSerumSpotMarket("SOL");
-  console.log(market);
-  const perpMarket = await getPerpMarket("SOL");
-  console.log(perpMarket);
-  //console.log(groupIds);
-  //buyPerp("SOL", 47, .1);
+    await init();
+    
+    // const spotAVAX = await getSpotMarket('AVAX/USDC');
+    // client.placeSpotOrder(
+    //     mangoGroup,
+    //     mangoAccount,
+    //     mangoGroup.mangoCache,
+    //     spotAVAX,
+    //     solAccountKeyPair,
+    //     'buy',
+    //     26,
+    //     .2,
+    //     'limit'
+    // );
 
+    // const perpBTC = await getPerpMarket('BTC');
+    // client.placePerpOrder2(
+    //     mangoGroup,
+    //     mangoAccount,
+    //     perpBTC,
+    //     solAccountKeyPair,
+    //     'buy',
+    //     10,
+    //     .1
+    // );
 }
 
 main();
