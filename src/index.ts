@@ -61,8 +61,9 @@ async function init() {
   const mangoProgramPk = new PublicKey(clusterData.mangoProgramId);
   const myMangoAccountPk = new PublicKey(mangoAccountAddress);
   const serumProgramPk = new PublicKey(clusterData.serumProgramId);
-  const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
-  
+  //const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
+  const clusterUrl = 'https://solana-api.projectserum.com';
+
   connection = new Connection(clusterUrl, 'processed' as Commitment);
   client = new MangoClient(connection, mangoProgramPk);
   mangoAccount = await client.getMangoAccount(myMangoAccountPk, serumProgramPk);
@@ -115,9 +116,16 @@ async function main() {
     const AVAXSpotMarketMaker = new mangoSpotMarketMaker(
         client,
         connection,
-        spotAVAX
+        spotAVAX,
+        solAccountKeyPair,
+        mangoGroup,
+        mangoAccount,
     );
-    AVAXSpotMarketMaker.showBids(20);
+    let asks = await AVAXSpotMarketMaker.getAsks(20);
+    for(let i = 0; i < asks.length; i++) {
+        console.log(asks[i][0], asks[i][1]);
+    }
+    
 
     
     // const spotAVAX = await getSpotMarket('AVAX/USDC');
