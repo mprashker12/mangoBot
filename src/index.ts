@@ -125,37 +125,6 @@ async function main() {
     for(let i = 0; i < asks.length; i++) {
         console.log(asks[i][0], asks[i][1]);
     }
-    
-
-    
-    // const spotAVAX = await getSpotMarket('AVAX/USDC');
-    // client.placeSpotOrder(
-    //     mangoGroup,
-    //     mangoAccount,
-    //     mangoGroup.mangoCache,
-    //     spotAVAX,
-    //     solAccountKeyPair,
-    //     'buy',
-    //     26,
-    //     .2,
-    //     'limit'
-    // );
-
-    //  const perpBTC = await loadMangoPerpMarket('BTC');
-    //  let asksB = await perpBTC.loadAsks(connection);
-    //  for(let [price, size] of asksB.getL2(20)) {
-    //      console.log(price, size);
-    //  }
-
-    // client.placePerpOrder2(
-    //     mangoGroup,
-    //     mangoAccount,
-    //     perpBTC,
-    //     solAccountKeyPair,
-    //     'buy',
-    //     10,
-    //     .1
-    // );
 }
 
 main();
