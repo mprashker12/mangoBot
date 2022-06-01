@@ -1,20 +1,22 @@
 import * as os from 'os';
 import * as fs from 'fs';
+import * as dotenv from 'dotenv';
+dotenv.config();
 
-//Solana
+//solana
 import { 
+    Cluster,
     Commitment, 
     Connection, 
     Keypair, 
     PublicKey, 
 } from '@solana/web3.js';
 
-//Serum
 import {
-    Market,
-} from '@blockworks-foundation/mango-client/node_modules/@project-serum/serum';
+    serumSpotMarket
+} from './serum';
 
-//Mango
+//mango
 import {
   Config,
   MangoClient,
@@ -23,23 +25,20 @@ import {
   GroupConfig,
   getMarketByBaseSymbolAndKind,
 } from '@blockworks-foundation/mango-client';
-
 import ids from '../ids.json';
 
-//globals
+//solana globals
+let connection : Connection; //Solana RPC Connection
+let solAccountKeyPair : Keypair; //Solana Account (owns Mango Account)
+
+//mango globals
 const cluster = 'mainnet';
-const group = 'mainnet.1';
-const myMangoAccountAddress : string = 'EsZWvt5hYSVYDp81374HkQpVvG7NctiTzzVpmkA17YXf';
-
-export let connection : Connection; //Solana RPC Connection
-
-let solAccountKeyPair : Keypair;
-
-let client : MangoClient;
+const group = process.env.group;
+const mangoAccountAddress = process.env.mangoAccountAddress;
 let mangoGroup : MangoGroup;
 let mangoAccount : MangoAccount;
-export let groupConfig : GroupConfig | undefined; 
-
+let client : MangoClient;
+let groupConfig : GroupConfig | undefined; 
 
 async function init() {
   const config = new Config(ids);
@@ -53,21 +52,16 @@ async function init() {
   if(!clusterData) {
     throw new Error('unable to get cluster data for Group ${group}');
   }
-
-
   const mangoGroupKey = groupConfig.publicKey;
   const mangoProgramPk = new PublicKey(clusterData.mangoProgramId);
-  const myMangoAccountPk = new PublicKey(myMangoAccountAddress);
-  
+  const myMangoAccountPk = new PublicKey(mangoAccountAddress);
   const serumProgramPk = new PublicKey(clusterData.serumProgramId);
-  
   const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
-  connection = new Connection(clusterUrl, 'processed' as Commitment);
   
+  connection = new Connection(clusterUrl, 'processed' as Commitment);
   client = new MangoClient(connection, mangoProgramPk);
   mangoAccount = await client.getMangoAccount(myMangoAccountPk, serumProgramPk);
   mangoGroup = await client.getMangoGroup(mangoGroupKey);
-
   solAccountKeyPair = Keypair.fromSecretKey(
     Uint8Array.from(
       JSON.parse(
@@ -96,23 +90,24 @@ async function getPerpMarket(sym : string) {
     ));
 }
 
-//Wrapped serum spot Market to interfce with Mango APIs.
-async function getMangoSpotMarket(sym : string) {
+async function getSpotMarket(sym : string) {
     const marketInfo = groupConfig.spotMarkets.find((m) => {
         return m.name === sym;
     });
-    
-    return await Market.load(
+
+    return new serumSpotMarket(
+        sym,
         connection,
         marketInfo.publicKey,
-        undefined,
-        groupConfig.serumProgramId,
+        groupConfig.serumProgramId
     );
  }
 
 
 async function main() {
     await init();
+    const market = await getSpotMarket('AVAX/USDC');
+    market.getAsks(10);
     
     // const spotAVAX = await getSpotMarket('AVAX/USDC');
     // client.placeSpotOrder(

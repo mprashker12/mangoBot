@@ -1,37 +1,58 @@
-import {
-    connection, //Solana Connection
-    groupConfig, //Mango Group Config
-} from './index'
+//Solana
+import { 
+    Connection, 
+    Keypair, 
+    PublicKey, 
+} from '@solana/web3.js';
 
+//serum
 import {
     Market,
 } from '@project-serum/serum'
 
-async function getSerumSpotMarket(sym : string) {
-    const marketInfo = groupConfig.spotMarkets.find((m) => {
-        return m.name === sym;
-    });
+export class serumSpotMarket {
     
-    return await Market.load(
-        connection,
-        marketInfo.publicKey,
-        undefined,
-        groupConfig.serumProgramId,
-    );
-}
+    symbol : string;
+    connection : Connection;
+    marketPk : PublicKey;
+    serumProgramId : PublicKey;
+    market : Promise<Market>;
+    
+    constructor(symbol : string, connection : Connection, marketPk : PublicKey, serumProgramId : PublicKey ) {
+        this.symbol = symbol;
+        this.connection = connection;
+        this.marketPk = marketPk;
+        this.serumProgramId = serumProgramId;
+        this.market = this.loadSerumSpotMarket();
+    }
 
-async function getBids(market : Market) {
-    const bids = await market.loadBids(connection);
-    for(let [price, size] of bids.getL2(20)) {
-        console.log(price, size);
+    async loadSerumSpotMarket() {
+        const market = await Market.load(
+            this.connection,
+            this.marketPk,
+            {},
+            this.serumProgramId,
+        );
+        return market;
+    }
+
+    async getBids(depth : number) {
+        const market = await this.market;
+        const bids = await market.loadBids(this.connection);
+        for(let [price, size] of bids.getL2(depth)) {
+            console.log(price, size);
+        }
+    }
+
+    async getAsks(depth : number) {
+        const market = await this.market;
+        const asks = await market.loadAsks(this.connection);
+        for(let [price, size] of asks.getL2(depth)) {
+            console.log(price, size);
+        }
     }
 }
 
-async function main() {
-    const AVAXSpot = await getSerumSpotMarket('AVAX/USDC');
-    await getBids(AVAXSpot);
-}
 
-main();
 
 
