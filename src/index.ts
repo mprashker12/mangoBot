@@ -25,6 +25,7 @@ import {
   MangoAccount,
   GroupConfig,
   getMarketByBaseSymbolAndKind,
+  getMarketIndexBySymbol,
 } from '@blockworks-foundation/mango-client';
 import ids from '../ids.json';
 
@@ -43,12 +44,12 @@ const mangoAccountAddress = process.env.mangoAccountAddress;
 let mangoGroup : MangoGroup;
 let mangoAccount : MangoAccount;
 let client : MangoClient;
-let groupConfig : GroupConfig | undefined; 
+let mangoGroupConfig : GroupConfig | undefined; 
 
 async function init() {
   const config = new Config(ids);
-  groupConfig = config.getGroup(cluster, group);
-  if (!groupConfig) {
+  mangoGroupConfig = config.getGroup(cluster, group);
+  if (!mangoGroupConfig) {
       throw new Error('unable to read Mango group config file');
   }
   const clusterData = ids.groups.find((g) => {
@@ -57,12 +58,12 @@ async function init() {
   if(!clusterData) {
     throw new Error('unable to get cluster data for Group ${group}');
   }
-  const mangoGroupKey = groupConfig.publicKey;
+  const mangoGroupKey = mangoGroupConfig.publicKey;
   const mangoProgramPk = new PublicKey(clusterData.mangoProgramId);
   const myMangoAccountPk = new PublicKey(mangoAccountAddress);
   const serumProgramPk = new PublicKey(clusterData.serumProgramId);
-  //const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
-  const clusterUrl = 'https://solana-api.projectserum.com';
+  const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
+  //const clusterUrl = 'https://solana-api.projectserum.com';
 
   connection = new Connection(clusterUrl, 'processed' as Commitment);
   client = new MangoClient(connection, mangoProgramPk);
@@ -83,7 +84,7 @@ async function init() {
 
 async function loadMangoPerpMarket(sym : string) {
     const perpMarketConfig = getMarketByBaseSymbolAndKind(
-        groupConfig,
+        mangoGroupConfig,
         sym,
         'perp'
     );
@@ -97,34 +98,42 @@ async function loadMangoPerpMarket(sym : string) {
 }
 
 async function loadMangoSpotMarket(sym : string) {
-    const marketInfo = groupConfig.spotMarkets.find((m) => {
-        return m.name === sym;
+  
+  const symAppended = sym + '/USDC';
+  
+  const marketInfo = mangoGroupConfig.spotMarkets.find((m) => {
+        return m.name === symAppended;
     });
 
     return Market.load(
         connection,
         marketInfo.publicKey,
         {},
-        groupConfig.serumProgramId
+        mangoGroupConfig.serumProgramId
     );
  }
 
 
 async function main() {
-    await init();
-    const spotAVAX = await loadMangoSpotMarket('AVAX/USDC');
-    const AVAXSpotMarketMaker = new mangoSpotMarketMaker(
+    await init(); //initalize solana and mango accounts. 
+    const onPerp = false; //are we market-making on a perp market?
+    const symbol = "AVAX";
+    const mangoMarketIndex = getMarketIndexBySymbol(
+      mangoGroupConfig,
+      symbol
+    );
+    const market = await loadMangoSpotMarket(symbol);
+    const marketMaker = new mangoSpotMarketMaker(
+        symbol,
         client,
         connection,
-        spotAVAX,
+        market,
         solAccountKeyPair,
         mangoGroup,
         mangoAccount,
     );
-    let asks = await AVAXSpotMarketMaker.getAsks(20);
-    for(let i = 0; i < asks.length; i++) {
-        console.log(asks[i][0], asks[i][1]);
-    }
+    await marketMaker.gogo();
+    await marketMaker.cleanUp();
 }
 
 main();
