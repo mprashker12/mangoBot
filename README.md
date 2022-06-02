@@ -1,0 +1,5 @@
+# mangoBot
+
+```
+yarn run mangoMaker
+```
