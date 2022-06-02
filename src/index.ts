@@ -88,7 +88,6 @@ async function loadMangoPerpMarket(sym : string) {
         sym,
         'perp'
     );
-
     return (await mangoGroup.loadPerpMarket(
         connection, 
         perpMarketConfig.marketIndex,
@@ -98,27 +97,24 @@ async function loadMangoPerpMarket(sym : string) {
 }
 
 async function loadMangoSpotMarket(sym : string) {
-  
   const symAppended = sym + '/USDC';
-  
   const marketInfo = mangoGroupConfig.spotMarkets.find((m) => {
         return m.name === symAppended;
-    });
-
-    return Market.load(
-        connection,
-        marketInfo.publicKey,
-        {},
-        mangoGroupConfig.serumProgramId
-    );
+  });
+  return Market.load(
+      connection,
+      marketInfo.publicKey,
+      {},
+      mangoGroupConfig.serumProgramId
+  );
  }
 
 
 async function main() {
     await init(); //initalize solana and mango accounts. 
     const onPerp = false; //are we market-making on a perp market?
-    const symbol = "AVAX";
-    const mangoMarketIndex = getMarketIndexBySymbol(
+    const symbol = "BTC";
+    const mangoMarketIndex = getMarketIndexBySymbol( 
       mangoGroupConfig,
       symbol
     );
@@ -133,7 +129,7 @@ async function main() {
         mangoAccount,
     );
     await marketMaker.gogo();
-    await marketMaker.cleanUp();
+    //await marketMaker.cleanUp();
 }
 
 main();

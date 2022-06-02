@@ -33,6 +33,7 @@ export class mangoSpotMarketMaker {
     client : MangoClient;
     connection : Connection;
     spotMarket : Market;
+    spotMarketTickSize : number;
     solanaOwner : Keypair;
     mangoGroup : MangoGroup;
     mangoAccount : MangoAccount;
@@ -52,6 +53,7 @@ export class mangoSpotMarketMaker {
         this.client = client;
         this.connection = connection;
         this.spotMarket = spotMarket;
+        this.spotMarketTickSize = this.spotMarket.tickSize;
         this.solanaOwner = solanaOwner
         this.mangoGroup = mangoGroup;
         this.mangoAccount = mangoAccount;
@@ -125,7 +127,7 @@ export class mangoSpotMarketMaker {
         //retrieve all open spot orders
         //collect data on these orders
         //cancel all of these orders
-        
+        console.log("Cancelling open orders...");
         await this.mangoGroup.loadRootBanks(this.connection);
         let openOrders = await this.mangoAccount.loadSpotOrdersForMarket(
             this.connection,
@@ -137,6 +139,8 @@ export class mangoSpotMarketMaker {
             console.log("Do not have any open orders");
             return;
         }
+
+        let numOrdersCancelled = 0;
     
         for(const openOrder of openOrders) {
             console.log("Cancelling Order", openOrder);
@@ -147,7 +151,9 @@ export class mangoSpotMarketMaker {
                 this.spotMarket,
                 openOrder
             );
+            numOrdersCancelled++;
         }
+        console.log("Finished cancelling", numOrdersCancelled, "orders.");
     }
 
     async gogo() {
@@ -159,9 +165,13 @@ export class mangoSpotMarketMaker {
         let asks = await this.getAsks(depth);
         depth = Math.min(bids.length, asks.length);
         
-        const predictedTrue = (await this.getPythPrice()).aggregate.price;
-        this.buy(.5, predictedTrue - .3);
-        this.sell(.5, predictedTrue + .5)
+        const pythPrice = await this.getPythPrice()
+        const predictedTrue = pythPrice.aggregate.price;
+        console.log(predictedTrue, pythPrice.confidence);
+        return;
+        
+        this.buy(.5, predictedTrue - 3*this.spotMarketTickSize);
+        this.sell(.5, predictedTrue  + 5*this.spotMarketTickSize);
     }
 
 }

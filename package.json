@@ -5,6 +5,9 @@
   "repository": "https://github.com/MatthewPrashker/mangoBot.git",
   "author": "MatthewPrashker <prashker.m@northeastern.edu>",
   "license": "MIT",
+  "scripts": {
+    "mangoMaker": "ts-node src/index.ts"
+  },
   "dependencies": {
     "@blockworks-foundation/mango-client": "^3.4.8",
     "@project-serum/serum": "^0.13.65",
