@@ -63,7 +63,7 @@ async function init() {
   const myMangoAccountPk = new PublicKey(mangoAccountAddress);
   const serumProgramPk = new PublicKey(clusterData.serumProgramId);
   const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
-  //const clusterUrl = 'https://solana-api.projectserum.com';
+  // const clusterUrl = 'https://solana-api.projectserum.com';
 
   connection = new Connection(clusterUrl, 'processed' as Commitment);
   client = new MangoClient(connection, mangoProgramPk);
@@ -109,11 +109,15 @@ async function loadMangoSpotMarket(sym : string) {
   );
  }
 
+ function delay(ms : number) {
+   return new Promise(resolve => setTimeout(resolve, ms));
+ }
+
 
 async function main() {
     await init(); //initalize solana and mango accounts. 
     const onPerp = false; //are we market-making on a perp market?
-    const symbol = "BTC";
+    const symbol = "AVAX";
     const mangoMarketIndex = getMarketIndexBySymbol( 
       mangoGroupConfig,
       symbol
@@ -128,8 +132,13 @@ async function main() {
         mangoGroup,
         mangoAccount,
     );
-    await marketMaker.gogo();
-    //await marketMaker.cleanUp();
+    for(let i = 0; i < 4; i++) {
+      console.log("ROUND NUMBER:", i)
+      await marketMaker.gogo();
+      await delay(15000);
+    }
+    await delay(15000);
+    await marketMaker.cleanUp();
 }
 
 main();

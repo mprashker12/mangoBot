@@ -12,7 +12,8 @@ import {
     MangoClient,
     MangoGroup,
     MangoAccount,
-    getMarketIndexBySymbol
+    MangoCache,
+    getMarketIndexBySymbol,
 } from '@blockworks-foundation/mango-client'
 
 //serum
@@ -26,6 +27,7 @@ import {
     PriceData,
     PythHttpClient
 } from '@pythnetwork/client/lib'
+import { orderBy } from 'lodash';
 
 export class mangoSpotMarketMaker {
 
@@ -39,6 +41,7 @@ export class mangoSpotMarketMaker {
     mangoAccount : MangoAccount;
     mangoMarketIndex : number;
     pythOracle : PythHttpClient;
+    localOpenOrders : number;
 
     constructor(
         symbol : string,
@@ -64,6 +67,7 @@ export class mangoSpotMarketMaker {
             this.connection,
             getPythProgramKeyForCluster('mainnet-beta')
         ); 
+        this.localOpenOrders = 0;
     }
 
     async getBids(depth : number) {
@@ -77,7 +81,7 @@ export class mangoSpotMarketMaker {
 
     async getAsks(depth : number) {
         let ret = [];
-        let asks = await this.spotMarket.loadBids(this.connection);
+        let asks = await this.spotMarket.loadAsks(this.connection);
         for(let [price, size] of asks.getL2(depth)) {
             ret.push([price, size]);
         }
@@ -97,7 +101,12 @@ export class mangoSpotMarketMaker {
             price,
             amount,
             "limit"
-        );
+        ).then((receipt) => {
+            console.log("place order", receipt);
+            this.localOpenOrders++;
+        }).catch((err) => {
+            console.log("Failed to place transaction", err);
+        });
     }
 
     async sell(amount : number, price : number) {
@@ -113,7 +122,12 @@ export class mangoSpotMarketMaker {
             price,
             amount,
             "limit"
-        );
+        ).then((receipt) => {
+            console.log("placed order", receipt);
+            this.localOpenOrders++;
+        }).catch((err) => {
+            console.log("Failed to place transaction", err);
+        });
     }
 
     //Return the Pyth Oracle data price
@@ -134,14 +148,6 @@ export class mangoSpotMarketMaker {
             this.spotMarket,
             this.mangoMarketIndex,
         );
-
-        if(openOrders.length === 0) {
-            console.log("Do not have any open orders");
-            return;
-        }
-
-        let numOrdersCancelled = 0;
-    
         for(const openOrder of openOrders) {
             console.log("Cancelling Order", openOrder);
             await this.client.cancelSpotOrder(
@@ -150,28 +156,42 @@ export class mangoSpotMarketMaker {
                 this.solanaOwner,
                 this.spotMarket,
                 openOrder
-            );
-            numOrdersCancelled++;
+            ).then((receipt) => {
+                console.log("Cancelled order", receipt);
+                this.localOpenOrders--;
+                if(this.localOpenOrders == 0) {
+                    return;
+                }
+            }).catch((err) => {
+                console.log("Failed to cancel order", err);
+            });
         }
-        console.log("Finished cancelling", numOrdersCancelled, "orders.");
     }
 
     async gogo() {
         //run strategy
         await this.cleanUp();
-        let depth = 20;
+        let depth = 4;
         
         let bids = await this.getBids(depth);
         let asks = await this.getAsks(depth);
-        depth = Math.min(bids.length, asks.length);
-        
+        let best_bid = bids[0][0]; //take into account size
+        let best_ask = asks[0][0];
         const pythPrice = await this.getPythPrice()
         const predictedTrue = pythPrice.aggregate.price;
-        console.log(predictedTrue, pythPrice.confidence);
-        return;
-        
-        this.buy(.5, predictedTrue - 3*this.spotMarketTickSize);
-        this.sell(.5, predictedTrue  + 5*this.spotMarketTickSize);
+        if(predictedTrue < best_bid) {
+            await this.buy(.5, predictedTrue);
+            return;
+        }
+        if(predictedTrue > best_ask) {
+            await this.sell(.5, predictedTrue);
+        }
+
+        const spread = (best_ask - best_bid)/2;
+
+        //note that we may trade up to 5x leverage
+        await this.buy(.5, predictedTrue - .33*spread);
+        await this.sell(.5, predictedTrue  + .5*spread);
     }
 
 }
