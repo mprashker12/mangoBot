@@ -32,6 +32,7 @@ import ids from '../ids.json';
 import {
     mangoSpotMarketMaker
  } from './mangoSpotMarketMaker';
+import { off } from 'process';
 
 //solana globals
 let connection : Connection; //Solana RPC Connection
@@ -132,13 +133,28 @@ async function main() {
         mangoGroup,
         mangoAccount,
     );
-    for(let i = 0; i < 4; i++) {
+    for(let i = 1; i <= 5; i++) {
       console.log("ROUND NUMBER:", i)
       await marketMaker.gogo();
-      await delay(15000);
+      await delay(10000);
     }
-    await delay(15000);
-    await marketMaker.cleanUp();
+
+    //make sure orders are cleaned up
+    await delay(20000);
+    let clean = await marketMaker.cleanUp();
+    if(clean) {
+      console.log("Finished running successfully with no outstanding orders!");
+    } else {
+      console.log("Finished with outstanding orders");
+      console.log("Looping until all orders have been cleaned...");
+      while(!clean) {
+          clean = await marketMaker.cleanUp();
+      }
+      console.log("All orders have now been cleared!")
+    }
+    console.log("Market Maker finished with net buys:", marketMaker.netBuys);
+    console.log("Market Maker finished with net sells:", marketMaker.netSells);
+    process.exit();
 }
 
 main();
