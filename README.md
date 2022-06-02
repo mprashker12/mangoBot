@@ -1,0 +1,3 @@
+# mangoBot
+
+'yarn run mangoMaker'
