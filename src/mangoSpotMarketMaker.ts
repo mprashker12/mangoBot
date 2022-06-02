@@ -4,7 +4,8 @@ import {
     Commitment, 
     Connection, 
     Keypair, 
-    PublicKey, 
+    PublicKey,
+    Transaction, 
 } from '@solana/web3.js';
 
 //mango
@@ -14,12 +15,19 @@ import {
     MangoAccount,
     MangoCache,
     getMarketIndexBySymbol,
+    makePlaceSpotOrder2Instruction,
+    makePlacePerpOrder2Instruction,
+    makeCancelSpotOrderInstruction,
+    GroupConfig,
+    SpotMarketConfig,
 } from '@blockworks-foundation/mango-client'
 
 //serum
 import {
     Market,
+
 } from '@blockworks-foundation/mango-client/node_modules/@project-serum/serum';
+
 
 //pyth
 import {
@@ -40,6 +48,8 @@ export class mangoSpotMarketMaker {
     mangoGroup : MangoGroup;
     mangoAccount : MangoAccount;
     mangoMarketIndex : number;
+    mangoGroupConfig : GroupConfig;
+    marketConfig : SpotMarketConfig;
     pythOracle : PythHttpClient;
 
     //mainted state for market making
@@ -53,7 +63,8 @@ export class mangoSpotMarketMaker {
         spotMarket : Market,
         solanaOwner : Keypair,
         mangoGroup : MangoGroup,
-        mangoAccount : MangoAccount) 
+        mangoAccount : MangoAccount,
+        mangoGroupConfig : GroupConfig) 
     {
         this.symbol = symbol;
         this.client = client;
@@ -66,6 +77,8 @@ export class mangoSpotMarketMaker {
         this.mangoMarketIndex = this.mangoGroup.getSpotMarketIndex(
             this.spotMarket.publicKey
         );
+        this.mangoGroupConfig = mangoGroupConfig;
+        this.marketConfig = this.mangoGroupConfig.spotMarkets[this.mangoMarketIndex];
         this.pythOracle = new PythHttpClient(
             this.connection,
             getPythProgramKeyForCluster('mainnet-beta')
@@ -93,8 +106,10 @@ export class mangoSpotMarketMaker {
     }
 
     async buy(amount : number, price : number) {
+
         console.log("Buying", "amount:", amount, "price:", price,
         "mango Account:", this.mangoAccount.publicKey.toBase58());
+
         
         await this.client.placeSpotOrder2(
             this.mangoGroup,
@@ -116,6 +131,7 @@ export class mangoSpotMarketMaker {
     async sell(amount : number, price : number) {
         console.log("Selling", "amount:", amount, "price:", price,
         "mango Account:", this.mangoAccount.publicKey.toBase58());
+
         
         await this.client.placeSpotOrder2(
             this.mangoGroup,
@@ -158,7 +174,10 @@ export class mangoSpotMarketMaker {
         //collect data on these orders
         //cancel all of these orders
         //returns true iff all sent local orders have been canceled. 
-        await this.mangoGroup.loadRootBanks(this.connection);
+        const rootBanks = await this.mangoGroup.loadRootBanks(this.connection);
+        
+        //get root bank and node bank directly from ids.json
+
         const openOrders = await this.mangoAccount.loadSpotOrdersForMarket(
             this.connection,
             this.spotMarket,
@@ -168,8 +187,28 @@ export class mangoSpotMarketMaker {
         });
         if(!openOrders) {return false;}
         let failedToCancelSomeOrder = false;
+
+        //const cancelTx = new Transaction();
         
         for(const openOrder of openOrders) {
+
+            // const cancelInstruction= makeCancelSpotOrderInstruction(
+            //     this.mangoGroupConfig.mangoProgramId,
+            //     this.mangoGroup.publicKey,
+            //     this.solanaOwner.publicKey,
+            //     this.mangoAccount.publicKey,
+            //     this.mangoGroup.dexProgramId,
+            //     this.spotMarket.publicKey,
+            //     this.marketConfig.bidsKey,
+            //     this.marketConfig.asksKey,
+            //     this.marketConfi,
+            //     this.solanaOwner.publicKey,
+            //     this.marketConfig.eventsKey,
+            //     openOrder,
+            // );
+
+            //cancelTx.add(cancelInstruction);
+
             console.log("Cancelling Order", openOrder);
             await this.client.cancelSpotOrder(
                 this.mangoGroup,
@@ -190,6 +229,12 @@ export class mangoSpotMarketMaker {
             });
         }
 
+        // await this.client.sendTransaction(
+        //     cancelTx,
+        //     this.solanaOwner,
+        //     []
+        // );
+
         if(failedToCancelSomeOrder) {
             return false;
         }
@@ -204,6 +249,7 @@ export class mangoSpotMarketMaker {
             return;
         }
 
+
         //run market making logic here. 
         let depth = 4;
         let bids = await this.getBids(depth);
@@ -212,6 +258,7 @@ export class mangoSpotMarketMaker {
         let best_ask = asks[0][0];
         const pythPrice = await this.getPythPrice()
         const predictedTrue = pythPrice.aggregate.price;
+        
         if(predictedTrue < best_bid) {
             await this.buy(.2, predictedTrue);
             return;
@@ -241,10 +288,10 @@ export class mangoSpotMarketMaker {
         const spread = weightedAskPrice - weightedBidPrice;
 
         //note that we may trade up to 5x leverage
-        await this.buy(.2, predictedTrue - 1.3*spread);
-        await this.sell(.2, predictedTrue  + .4*spread);
-        await this.sell(.15, predictedTrue + .5*spread);
-        await this.buy(.15, predictedTrue - 2*spread);
+        await this.buy(4, predictedTrue - 1.3*spread);
+        await this.sell(4, predictedTrue  + .2*spread);
+        await this.sell(4, predictedTrue + .3*spread);
+        await this.buy(4, predictedTrue - 2*spread);
     }
 
 }

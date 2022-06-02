@@ -26,13 +26,14 @@ import {
   GroupConfig,
   getMarketByBaseSymbolAndKind,
   getMarketIndexBySymbol,
+  makePlacePerpOrder2Instruction,
 } from '@blockworks-foundation/mango-client';
 import ids from '../ids.json';
 
 import {
     mangoSpotMarketMaker
  } from './mangoSpotMarketMaker';
-import { off } from 'process';
+import { mangoPerpMarketMaker } from './mangoPerpMarketMaker';
 
 //solana globals
 let connection : Connection; //Solana RPC Connection
@@ -115,10 +116,35 @@ async function loadMangoSpotMarket(sym : string) {
  }
 
 
-async function main() {
+
+ async function makePerp() {
+    await init();
+    const symbol = "AVAX";
+    const perpMarketConfig = getMarketByBaseSymbolAndKind(
+      mangoGroupConfig,
+      symbol,
+      'perp'
+    );
+    const perpMarketMaker = new mangoPerpMarketMaker(
+      symbol,
+      connection,
+      client,
+      perpMarketConfig,
+      solAccountKeyPair,
+      mangoGroup,
+      mangoGroupConfig,
+      mangoAccount,
+    );
+
+
+
+ }
+
+
+async function makeSpot() {
     await init(); //initalize solana and mango accounts. 
     const onPerp = false; //are we market-making on a perp market?
-    const symbol = "AVAX";
+    const symbol = "SRM";
     const mangoMarketIndex = getMarketIndexBySymbol( 
       mangoGroupConfig,
       symbol
@@ -132,15 +158,17 @@ async function main() {
         solAccountKeyPair,
         mangoGroup,
         mangoAccount,
+        mangoGroupConfig,
     );
-    for(let i = 1; i <= 5; i++) {
+ 
+    for(let i = 1; i <= 2; i++) {
       console.log("ROUND NUMBER:", i)
       await marketMaker.gogo();
       await delay(10000);
     }
 
     //make sure orders are cleaned up
-    await delay(20000);
+    await delay(5000);
     let clean = await marketMaker.cleanUp();
     if(clean) {
       console.log("Finished running successfully with no outstanding orders!");
@@ -157,4 +185,5 @@ async function main() {
     process.exit();
 }
 
-main();
+//makeSpot();
+makePerp();
