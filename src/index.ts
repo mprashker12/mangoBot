@@ -12,7 +12,7 @@ import {
     PublicKey, 
 } from '@solana/web3.js';
 
-//serum
+//serum (only need to load spot markets. may remove if focus on perps)
 import {
     Market
 } from '@blockworks-foundation/mango-client/node_modules/@project-serum/serum';
@@ -38,8 +38,10 @@ import ids from '../ids.json';
 import {
     mangoSpotMarketMaker
  } from './mangoSpotMarketMaker';
-import { mangoPerpMarketMaker } from './mangoPerpMarketMaker';
-import { rawListeners } from 'process';
+import { 
+  mangoPerpMarketMaker 
+} from './mangoPerpMarketMaker';
+
 
 //solana globals
 let connection : Connection; //Solana RPC Connection
@@ -55,6 +57,7 @@ let client : MangoClient;
 let mangoGroupConfig : GroupConfig | undefined; 
 
 async function init() {
+  //general Mango Group Configuration
   const config = new Config(ids);
   mangoGroupConfig = config.getGroup(cluster, group);
   if (!mangoGroupConfig) {
@@ -68,15 +71,16 @@ async function init() {
   }
   const mangoGroupKey = mangoGroupConfig.publicKey;
   const mangoProgramPk = new PublicKey(clusterData.mangoProgramId);
-  const myMangoAccountPk = new PublicKey(mangoAccountAddress);
   const serumProgramPk = new PublicKey(clusterData.serumProgramId);
-  const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
-  // const clusterUrl = 'https://solana-api.projectserum.com';
-
+  
+  //account configurations
+  const mangoAccountPk = new PublicKey(mangoAccountAddress);
+  // const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
+  const clusterUrl = 'https://solana-api.projectserum.com';
   connection = new Connection(clusterUrl, 'processed' as Commitment);
   client = new MangoClient(connection, mangoProgramPk);
-  mangoAccount = await client.getMangoAccount(myMangoAccountPk, serumProgramPk);
   mangoGroup = await client.getMangoGroup(mangoGroupKey);
+  mangoAccount = await client.getMangoAccount(mangoAccountPk, serumProgramPk);
   solAccountKeyPair = Keypair.fromSecretKey(
     Uint8Array.from(
       JSON.parse(
@@ -109,6 +113,7 @@ async function loadMangoCache(
   if(!mangoCache) {
     throw Error("Failed to load Mango Cache Account");
   }
+  console.log("Successfully loaded Mango Cache");
   return mangoCache;
 }
   
@@ -152,6 +157,11 @@ async function loadMangoSpotMarket(sym : string) {
       symbol,
       'perp'
     );
+    const mangoMarketIndex = getMarketIndexBySymbol( 
+      mangoGroupConfig,
+      symbol
+    );
+    console.log(mangoMarketIndex);
     let perpMarket : PerpMarket;
     let mangoCache : MangoCache;
     perpMarket = await loadMangoPerpMarket(perpMarketConfig);
@@ -171,7 +181,7 @@ async function loadMangoSpotMarket(sym : string) {
       mangoAccount,
       mangoCache,
     );
-    perpMarketMaker.showMangoAccountBalances();
+    perpMarketMaker.gogo();
  }
 
 

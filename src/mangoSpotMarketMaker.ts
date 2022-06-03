@@ -33,7 +33,7 @@ import {
 import {
     getPythProgramKeyForCluster,
     PriceData,
-    PythHttpClient
+    PythHttpClient,
 } from '@pythnetwork/client/lib'
 import { orderBy } from 'lodash';
 
