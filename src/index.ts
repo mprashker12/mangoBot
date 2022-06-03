@@ -23,10 +23,15 @@ import {
   MangoClient,
   MangoGroup,
   MangoAccount,
+  MangoCacheLayout,
   GroupConfig,
   getMarketByBaseSymbolAndKind,
   getMarketIndexBySymbol,
+  getMultipleAccounts,
   makePlacePerpOrder2Instruction,
+  MangoCache,
+  PerpMarketConfig,
+  PerpMarket,
 } from '@blockworks-foundation/mango-client';
 import ids from '../ids.json';
 
@@ -34,6 +39,7 @@ import {
     mangoSpotMarketMaker
  } from './mangoSpotMarketMaker';
 import { mangoPerpMarketMaker } from './mangoPerpMarketMaker';
+import { rawListeners } from 'process';
 
 //solana globals
 let connection : Connection; //Solana RPC Connection
@@ -84,18 +90,42 @@ async function init() {
   )
 }
 
-async function loadMangoPerpMarket(sym : string) {
-    const perpMarketConfig = getMarketByBaseSymbolAndKind(
-        mangoGroupConfig,
-        sym,
-        'perp'
-    );
-    return (await mangoGroup.loadPerpMarket(
+async function loadMangoCache(
+  connection : Connection,
+  mangoGroup : MangoGroup
+) : Promise<MangoCache> | undefined {
+  const accounts = await getMultipleAccounts(
+    connection,
+    [mangoGroup.mangoCache]
+  );
+  if(accounts.length === 0) {
+    throw Error("Failed to load Mango Cache Account");
+  }
+  const cacheAccount = accounts[0];
+  const mangoCache = new MangoCache(
+    cacheAccount.publicKey,
+    MangoCacheLayout.decode(cacheAccount.accountInfo.data),
+  );
+  if(!mangoCache) {
+    throw Error("Failed to load Mango Cache Account");
+  }
+  return mangoCache;
+}
+  
+async function loadMangoPerpMarket(
+  perpMarketConfig : PerpMarketConfig
+) : Promise<PerpMarket> | undefined {
+    const perpMarket = await mangoGroup.loadPerpMarket(
         connection, 
         perpMarketConfig.marketIndex,
         perpMarketConfig.baseDecimals,
         perpMarketConfig.quoteDecimals
-    ));
+    )
+    if(perpMarket) {
+      console.log("Successfully loaded perpMarket", symbol);
+      return perpMarket;
+    }
+    throw Error("Failed to load Mango Perp Market" + symbol);
 }
 
 async function loadMangoSpotMarket(sym : string) {
@@ -115,29 +145,33 @@ async function loadMangoSpotMarket(sym : string) {
    return new Promise(resolve => setTimeout(resolve, ms));
  }
 
-
-
- async function makePerp() {
+ async function makePerp(symbol : string) {
     await init();
-    const symbol = "AVAX";
     const perpMarketConfig = getMarketByBaseSymbolAndKind(
       mangoGroupConfig,
       symbol,
       'perp'
     );
+    let perpMarket : PerpMarket;
+    let mangoCache : MangoCache;
+    perpMarket = await loadMangoPerpMarket(perpMarketConfig);
+    mangoCache = await loadMangoCache(
+      connection,
+      mangoGroup
+    );
     const perpMarketMaker = new mangoPerpMarketMaker(
       symbol,
       connection,
       client,
+      perpMarket,
       perpMarketConfig,
       solAccountKeyPair,
       mangoGroup,
       mangoGroupConfig,
       mangoAccount,
+      mangoCache,
     );
-
-
-
+    perpMarketMaker.showMangoAccountBalances();
  }
 
 
@@ -186,4 +220,5 @@ async function makeSpot() {
 }
 
 //makeSpot();
-makePerp();
+const symbol = "AVAX";
+makePerp(symbol);
