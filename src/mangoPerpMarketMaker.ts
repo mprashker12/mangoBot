@@ -12,21 +12,40 @@ import {
     GroupConfig,
     PerpMarketConfig,
     PerpMarket,
+    PerpEventQueue,
+    PerpEventQueueLayout,
+    PerpAccount,
     makePlacePerpOrder2Instruction,
+    getMarketIndexBySymbol,
     I64_MAX_BN,
     BN,
+
     MangoCache,
 } from '@blockworks-foundation/mango-client'
+
+import {
+    ParsedFillEvent,
+} from '@blockworks-foundation/mango-client/lib/src/PerpMarket'
+
+import {
+    OpenOrders
+} from '@project-serum/serum'
+
+
 
 //pyth
 import { 
     PythHttpClient,
+    PythConnection,
     getPythProgramKeyForCluster
  } from '@pythnetwork/client';
 
+ //improved design to batch together many buy and sell instructions into a single
+ //solana transaction. 
 export class mangoPerpMarketMaker {
 
     symbol : string;
+    pythSymbol : string;
     connection : Connection;
     mangoClient : MangoClient;
     perpMarketConfig : PerpMarketConfig;
@@ -36,8 +55,12 @@ export class mangoPerpMarketMaker {
     mangoGroupConfig : GroupConfig;
     mangoAccount : MangoAccount;
     mangoCache : MangoCache;
-    pythOracle : PythHttpClient
+    pythOracle : PythHttpClient;
+    pythConnection : PythConnection;
     currOrderId : number;
+    orderBookFillSeqNum : BN;
+    mangoMarketIndex : number;
+    perpAccount : PerpAccount;
 
     constructor(
         symbol : string,
@@ -52,6 +75,7 @@ export class mangoPerpMarketMaker {
         mangoCache : MangoCache,
     ) {
         this.symbol = symbol;
+        this.pythSymbol = "Crypto." + this.symbol + "/USD";
         this.connection = connection;
         this.mangoClient = mangoClient;
         this.perpMarket = perpMarket;
@@ -62,15 +86,55 @@ export class mangoPerpMarketMaker {
         this.mangoAccount = mangoAccount;
         this.mangoCache = mangoCache;
 
+        this.mangoMarketIndex = getMarketIndexBySymbol( 
+            mangoGroupConfig,
+            symbol
+        );
+        this.perpAccount = this.mangoAccount
+                            .perpAccounts[this.mangoMarketIndex];
+
         //used to estimate spot price
-        this.pythOracle = new PythHttpClient(
+        this.initPyth();
+
+        //Order book stream of the perpMarket
+        this.initOrderBookStream();
+        this.orderBookFillSeqNum = new BN(0);
+
+        this.mangoAccount.perpAccounts
+    }
+
+    
+    initPyth() {
+        this.pythConnection = new PythConnection(
             this.connection,
             getPythProgramKeyForCluster('mainnet-beta')
         );
-        
-        //state related to market making
-        this.currOrderId = 0;
+        this.pythConnection.onPriceChange((product, price) => {
+            if(product.symbol === this.pythSymbol) {
+                console.log("Pyth Price update:", price.aggregate.price)
+            }
+        });
+        this.pythConnection.start();
     }
+
+    initOrderBookStream() {
+        this.connection.onAccountChange(this.perpMarketConfig.eventsKey, (accountInfo) => {
+            const queue = new PerpEventQueue(
+                PerpEventQueueLayout.decode(accountInfo.data),
+            );
+            const fills = queue
+                .eventsSince(this.orderBookFillSeqNum)
+                .map((e) => e.fill)
+                .filter((e) => !!e)
+                .map((e) => this.perpMarket.parseFillEvent(e) as ParsedFillEvent);
+            
+            for(const fill of fills) {
+                console.log("fill for ", fill.price, fill.quantity, fill.seqNum.toNumber());
+                this.orderBookFillSeqNum = BN.max(this.orderBookFillSeqNum, fill.seqNum);
+            }
+        })
+    }
+    
 
     showMangoAccountBalances() {
         console.log(
@@ -105,5 +169,9 @@ export class mangoPerpMarketMaker {
             'postOnly',
             false,
         );
+    }
+
+    gogo() {
+        
     }
 }
