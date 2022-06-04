@@ -20,8 +20,8 @@ import {
     getMarketIndexBySymbol,
     I64_MAX_BN,
     BN,
-
     MangoCache,
+    makeCancelAllPerpOrdersInstruction,
 } from '@blockworks-foundation/mango-client'
 
 import {
@@ -32,20 +32,22 @@ import {
     OpenOrders
 } from '@project-serum/serum'
 
-
-
 //pyth
 import { 
     PythHttpClient,
     PythConnection,
     getPythProgramKeyForCluster
  } from '@pythnetwork/client';
-import { text } from 'stream/consumers';
+
+import {
+    delay,
+    mean,
+    std,
+} from './utils';
 
  //improved design to batch together many buy and sell instructions into a single
  //solana transaction. 
 export class mangoPerpMarketMaker {
-
     symbol : string;
     pythSymbol : string;
     connection : Connection;
@@ -59,12 +61,21 @@ export class mangoPerpMarketMaker {
     mangoCache : MangoCache;
     pythOracle : PythHttpClient;
     pythConnection : PythConnection;
-    currOrderId : number;
-    orderBookFillSeqNum : BN;
     mangoMarketIndex : number;
     perpAccount : PerpAccount;
     lastestPythPrice : number | undefined;
-    bundleIdSeqNum : number;
+    bundleIdSeqNum : BN; //index of bundles we send 0,1,...
+    orderBookFillSeqNum : BN //keep track of new fills to listen to...
+    secondBetweenBundleSends : number; //how long should we wait between bundle sends
+    fillsDuringCurrentRound : ParsedFillEvent[];
+    pricesDuringCurrentRound : number[];
+    fillHistory : ParsedFillEvent[][];
+    priceHistory : number[][];
+
+    //state vars to market make well
+    overallLongPosition : number;
+    overallShortPosition : number;
+    spread : 0;
 
     constructor(
         symbol : string,
@@ -89,8 +100,6 @@ export class mangoPerpMarketMaker {
         this.mangoGroupConfig = mangoGroupConfig;
         this.mangoAccount = mangoAccount;
         this.mangoCache = mangoCache;
-        this.bundleIdSeqNum = 1;
-
 
         this.mangoMarketIndex = getMarketIndexBySymbol( 
             mangoGroupConfig,
@@ -98,18 +107,19 @@ export class mangoPerpMarketMaker {
         );
         this.perpAccount = this.mangoAccount
                             .perpAccounts[this.mangoMarketIndex];
+        
+        this.listenPyth(); //to estimate spot price
+        this.listenForFills();
 
-        //used to estimate spot price
-        this.listenPyth();
-
-        //Order book stream of the perpMarket
-        this.listenOrderBook();
+        this.fillsDuringCurrentRound = [];
+        this.fillHistory = [];
+        this.pricesDuringCurrentRound = [];
+        this.priceHistory = [];
+        this.bundleIdSeqNum = new BN(0); 
         this.orderBookFillSeqNum = new BN(0);
-
-        this.mangoAccount.perpAccounts
+        this.secondBetweenBundleSends = 20;
     }
 
-    
     listenPyth() {
         this.pythConnection = new PythConnection(
             this.connection,
@@ -118,12 +128,13 @@ export class mangoPerpMarketMaker {
         this.pythConnection.onPriceChange((product, price) => {
             if(product.symbol === this.pythSymbol) {
                 this.lastestPythPrice = price.aggregate.price;
+                this.pricesDuringCurrentRound.push(price.aggregate.price);
             }
         });
         this.pythConnection.start();
     }
 
-    listenOrderBook() {
+    listenForFills() {
         this.connection.onAccountChange(this.perpMarketConfig.eventsKey, (accountInfo) => {
             const queue = new PerpEventQueue(
                 PerpEventQueueLayout.decode(accountInfo.data),
@@ -135,48 +146,59 @@ export class mangoPerpMarketMaker {
                 .map((e) => this.perpMarket.parseFillEvent(e) as ParsedFillEvent);
             
             for(const fill of fills) {
-                console.log("fill for ", fill.price, fill.quantity, fill.seqNum.toNumber());
+                console.log(
+                    "fill for ", 
+                    fill.price, 
+                    fill.quantity, 
+                    fill.seqNum.toNumber(),
+                    fill.maker.toBase58(),
+                );
+                this.fillsDuringCurrentRound.push(fill);
                 this.orderBookFillSeqNum = BN.max(this.orderBookFillSeqNum, fill.seqNum);
             }
         })
     }
     
 
-    showMangoAccountBalances() {
-        console.log(
-            this.mangoAccount.toPrettyString(
-                this.mangoGroupConfig,
-                this.mangoGroup,
-                this.mangoCache
-            )
-        );
-    }
-
     //elems of buyOrders, sellOrders === (price, size)
-    async executeOrders(buyOrders : number[][], sellOrders : number[][]) {
-        const orderTx= new Transaction();
+    async executeBundle(buyOrders : number[][], sellOrders : number[][]) {
+        const bundleTx= new Transaction();
+
+        const cancelTx = makeCancelAllPerpOrdersInstruction(
+            this.mangoGroupConfig.mangoProgramId,
+            this.mangoGroup.publicKey,
+            this.mangoAccount.publicKey,
+            this.solAccount.publicKey,
+            this.perpMarket.publicKey,
+            this.perpMarketConfig.bidsKey,
+            this.perpMarketConfig.asksKey,
+            new BN(15), //max number of orders to cancel in the instruction
+        );
+
+        bundleTx.add(cancelTx);
+
         for(const buyOrder of buyOrders) {
-            console.log("Adding buy:", buyOrder , "to order bundle");
-            orderTx.add(this.buildOrderInstruction(buyOrder[0], buyOrder[1], 'buy'));
+            console.log("Adding buy:", buyOrder , "to order bundle", this.bundleIdSeqNum.toString());
+            bundleTx.add(this.buildOrderIx(buyOrder[0], buyOrder[1], 'buy'));
         }
         for(const sellOrder of sellOrders) {
-            console.log("Adding sell:", sellOrder , "to order bundle");
-            orderTx.add(this.buildOrderInstruction(sellOrder[0], sellOrder[1], 'sell'));
+            console.log("Adding sell:", sellOrder , "to order bundle", this.bundleIdSeqNum.toString());
+            bundleTx.add(this.buildOrderIx(sellOrder[0], sellOrder[1], 'sell'));
         }
-        console.log("Sending order bundle", this.bundleIdSeqNum, "...");
+        console.log("Sending order bundle", this.bundleIdSeqNum.toString(), "...");
         await this.mangoClient.sendTransaction(
-            orderTx,
+            bundleTx,
             this.solAccount,
             [] //other signers of the tx
         ).then((res) => {
-            console.log("Order bundle",this.bundleIdSeqNum, "was successfully sent!");
-            this.bundleIdSeqNum += 1;
+            console.log("Order bundle",this.bundleIdSeqNum.toString(), "was successfully sent!");
         }).catch((err) => {
-            console.log("Failed to send order bundle", this.bundleIdSeqNum, err);
+            console.log("Failed to send order bundle", this.bundleIdSeqNum.toString(), err);
         });
     }
     
-    buildOrderInstruction(
+    //builds bundle to batch cancel old and send new orders
+    buildOrderIx(
         price : number, 
         size : number, 
         side : 'buy' | 'sell')
@@ -199,16 +221,102 @@ export class mangoPerpMarketMaker {
             I64_MAX_BN, //max base quantity
             new BN(0), //max quote quantity
             side,
-            new BN(this.bundleIdSeqNum),
+            new BN(20),
             'postOnly',
             false,
         );
     }
 
+    async cleanUp() {
+        const cleanUpTx= new Transaction();
 
-    async gogo() {
-        const buyOrders = [];
-        const sellOrders = [[21.50, .1], [21.50, .1]];
-        await this.executeOrders(buyOrders, sellOrders);
+        const cancelIx = makeCancelAllPerpOrdersInstruction(
+            this.mangoGroupConfig.mangoProgramId,
+            this.mangoGroup.publicKey,
+            this.mangoAccount.publicKey,
+            this.solAccount.publicKey,
+            this.perpMarket.publicKey,
+            this.perpMarketConfig.bidsKey,
+            this.perpMarketConfig.asksKey,
+            new BN(255), //max number of orders to cancel 
+        );
+        cleanUpTx.add(cancelIx);
+        
+        let success = false;
+        await this.mangoClient.sendTransaction(
+            cleanUpTx,
+            this.solAccount,
+            []
+        ).then((res) => {
+            console.log("Sucessfully sent clean up Transaction");
+            success = true;
+        }).catch((err) => {
+            console.log("Failed to send clean up Transaction");
+            success = false;
+        })
+        return success;
+    }
+
+    updateMakerState() {
+
+        //update spread and other maker vars
+        console.log(this.bundleIdSeqNum);
+        if(this.pricesDuringCurrentRound.length > 0) {
+            console.log("Average price during previous round:", mean(this.pricesDuringCurrentRound));
+            console.log("Standard Deviation of prices during previous round:", std(this.pricesDuringCurrentRound));
+        } else {
+            console.log("Did not see any previous during round");
+        }
+    }
+
+
+    calculateOrdersToMake() : number[][][] {
+        //use state to make buy and sell orders. 
+        
+        //simplest possible strategy
+        const buys = [[this.lastestPythPrice - .1, .5]];
+        const sells = [[this.lastestPythPrice + .1, .5]];
+
+        return [buys, sells];
+    }
+
+    showMangoAccountBalances() {
+        console.log(
+            this.mangoAccount.toPrettyString(
+                this.mangoGroupConfig,
+                this.mangoGroup,
+                this.mangoCache
+            )
+        );
+    }
+
+    async gogo(numRounds : number) {
+        
+        //wait until we have at least one Pyth Price
+        while(!this.lastestPythPrice) {
+            await delay(100);
+        }
+
+        for(let i = 0; i < numRounds; i++) {
+            //act on current state
+            const [buyOrders, sellOrders] = this.calculateOrdersToMake();
+            await this.executeBundle(buyOrders, sellOrders);
+            await delay(this.secondBetweenBundleSends*1000);
+            this.updateMakerState();
+            
+            //prepare for next round
+            this.fillHistory.push(this.fillsDuringCurrentRound);
+            this.priceHistory.push(this.pricesDuringCurrentRound);
+            this.fillsDuringCurrentRound = [];
+            this.pricesDuringCurrentRound = [];
+            this.bundleIdSeqNum = this.bundleIdSeqNum.add(new BN(1));
+        }
+
+        while(!(await this.cleanUp())) {
+            await delay(100);
+        }
+
+        console.log("Done!")
+        process.exit(0);
     }
 }

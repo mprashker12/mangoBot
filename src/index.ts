@@ -28,20 +28,15 @@ import {
   getMarketByBaseSymbolAndKind,
   getMarketIndexBySymbol,
   getMultipleAccounts,
-  makePlacePerpOrder2Instruction,
   MangoCache,
   PerpMarketConfig,
   PerpMarket,
 } from '@blockworks-foundation/mango-client';
 import ids from '../ids.json';
 
-import {
-    mangoSpotMarketMaker
- } from './mangoSpotMarketMaker';
 import { 
   mangoPerpMarketMaker 
 } from './mangoPerpMarketMaker';
-
 
 //solana globals
 let connection : Connection; //Solana RPC Connection
@@ -133,23 +128,6 @@ async function loadMangoPerpMarket(
     throw Error("Failed to load Mango Perp Market" + symbol);
 }
 
-async function loadMangoSpotMarket(sym : string) {
-  const symAppended = sym + '/USDC';
-  const marketInfo = mangoGroupConfig.spotMarkets.find((m) => {
-        return m.name === symAppended;
-  });
-  return Market.load(
-      connection,
-      marketInfo.publicKey,
-      {},
-      mangoGroupConfig.serumProgramId
-  );
- }
-
- function delay(ms : number) {
-   return new Promise(resolve => setTimeout(resolve, ms));
- }
-
  async function makePerp(symbol : string) {
     await init();
     const perpMarketConfig = getMarketByBaseSymbolAndKind(
@@ -180,54 +158,9 @@ async function loadMangoSpotMarket(sym : string) {
       mangoAccount,
       mangoCache,
     );
-    perpMarketMaker.gogo();
+
+    perpMarketMaker.gogo(5);
  }
 
-
-async function makeSpot() {
-    await init(); //initalize solana and mango accounts. 
-    const onPerp = false; //are we market-making on a perp market?
-    const symbol = "SRM";
-    const mangoMarketIndex = getMarketIndexBySymbol( 
-      mangoGroupConfig,
-      symbol
-    );
-    const market = await loadMangoSpotMarket(symbol);
-    const marketMaker = new mangoSpotMarketMaker(
-        symbol,
-        client,
-        connection,
-        market,
-        solAccountKeyPair,
-        mangoGroup,
-        mangoAccount,
-        mangoGroupConfig,
-    );
- 
-    for(let i = 1; i <= 2; i++) {
-      console.log("ROUND NUMBER:", i)
-      await marketMaker.gogo();
-      await delay(10000);
-    }
-
-    //make sure orders are cleaned up
-    await delay(5000);
-    let clean = await marketMaker.cleanUp();
-    if(clean) {
-      console.log("Finished running successfully with no outstanding orders!");
-    } else {
-      console.log("Finished with outstanding orders");
-      console.log("Looping until all orders have been cleaned...");
-      while(!clean) {
-          clean = await marketMaker.cleanUp();
-      }
-      console.log("All orders have now been cleared!")
-    }
-    console.log("Market Maker finished with net buys:", marketMaker.netBuys);
-    console.log("Market Maker finished with net sells:", marketMaker.netSells);
-    process.exit();
-}
-
-//makeSpot();
 const symbol = "AVAX";
 makePerp(symbol);
