@@ -75,8 +75,8 @@ async function init() {
   
   //account configurations
   const mangoAccountPk = new PublicKey(mangoAccountAddress);
-  // const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
-  const clusterUrl = 'https://solana-api.projectserum.com';
+  const clusterUrl = ids.cluster_urls[cluster]; //Change to other RPC endpoint under congestion
+  // const clusterUrl = 'https://solana-api.projectserum.com';
   connection = new Connection(clusterUrl, 'processed' as Commitment);
   client = new MangoClient(connection, mangoProgramPk);
   mangoGroup = await client.getMangoGroup(mangoGroupKey);
@@ -161,7 +161,6 @@ async function loadMangoSpotMarket(sym : string) {
       mangoGroupConfig,
       symbol
     );
-    console.log(mangoMarketIndex);
     let perpMarket : PerpMarket;
     let mangoCache : MangoCache;
     perpMarket = await loadMangoPerpMarket(perpMarketConfig);

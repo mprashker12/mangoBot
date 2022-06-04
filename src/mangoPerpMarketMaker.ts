@@ -1,7 +1,8 @@
 //solana
 import { 
     Connection, 
-    Keypair, 
+    Keypair,
+    Transaction, 
 } from '@solana/web3.js';
 
 //mango
@@ -39,6 +40,7 @@ import {
     PythConnection,
     getPythProgramKeyForCluster
  } from '@pythnetwork/client';
+import { text } from 'stream/consumers';
 
  //improved design to batch together many buy and sell instructions into a single
  //solana transaction. 
@@ -61,6 +63,8 @@ export class mangoPerpMarketMaker {
     orderBookFillSeqNum : BN;
     mangoMarketIndex : number;
     perpAccount : PerpAccount;
+    lastestPythPrice : number | undefined;
+    bundleIdSeqNum : number;
 
     constructor(
         symbol : string,
@@ -85,6 +89,8 @@ export class mangoPerpMarketMaker {
         this.mangoGroupConfig = mangoGroupConfig;
         this.mangoAccount = mangoAccount;
         this.mangoCache = mangoCache;
+        this.bundleIdSeqNum = 1;
+
 
         this.mangoMarketIndex = getMarketIndexBySymbol( 
             mangoGroupConfig,
@@ -94,30 +100,30 @@ export class mangoPerpMarketMaker {
                             .perpAccounts[this.mangoMarketIndex];
 
         //used to estimate spot price
-        this.initPyth();
+        this.listenPyth();
 
         //Order book stream of the perpMarket
-        this.initOrderBookStream();
+        this.listenOrderBook();
         this.orderBookFillSeqNum = new BN(0);
 
         this.mangoAccount.perpAccounts
     }
 
     
-    initPyth() {
+    listenPyth() {
         this.pythConnection = new PythConnection(
             this.connection,
             getPythProgramKeyForCluster('mainnet-beta')
         );
         this.pythConnection.onPriceChange((product, price) => {
             if(product.symbol === this.pythSymbol) {
-                console.log("Pyth Price update:", price.aggregate.price)
+                this.lastestPythPrice = price.aggregate.price;
             }
         });
         this.pythConnection.start();
     }
 
-    initOrderBookStream() {
+    listenOrderBook() {
         this.connection.onAccountChange(this.perpMarketConfig.eventsKey, (accountInfo) => {
             const queue = new PerpEventQueue(
                 PerpEventQueueLayout.decode(accountInfo.data),
@@ -145,8 +151,36 @@ export class mangoPerpMarketMaker {
             )
         );
     }
+
+    //elems of buyOrders, sellOrders === (price, size)
+    async executeOrders(buyOrders : number[][], sellOrders : number[][]) {
+        const orderTx= new Transaction();
+        for(const buyOrder of buyOrders) {
+            console.log("Adding buy:", buyOrder , "to order bundle");
+            orderTx.add(this.buildOrderInstruction(buyOrder[0], buyOrder[1], 'buy'));
+        }
+        for(const sellOrder of sellOrders) {
+            console.log("Adding sell:", sellOrder , "to order bundle");
+            orderTx.add(this.buildOrderInstruction(sellOrder[0], sellOrder[1], 'sell'));
+        }
+        console.log("Sending order bundle", this.bundleIdSeqNum, "...");
+        await this.mangoClient.sendTransaction(
+            orderTx,
+            this.solAccount,
+            [] //other signers of the tx
+        ).then((res) => {
+            console.log("Order bundle",this.bundleIdSeqNum, "was successfully sent!");
+            this.bundleIdSeqNum += 1;
+        }).catch((err) => {
+            console.log("Failed to send order bundle", this.bundleIdSeqNum, err);
+        });
+    }
     
-    buildBuyInstruction(price : number, size : number) {
+    buildOrderInstruction(
+        price : number, 
+        size : number, 
+        side : 'buy' | 'sell')
+    {
         const [nativeAskPrice, nativeAskQuantity] = 
             this.perpMarket.uiToNativePriceQuantity(price, size);
         return makePlacePerpOrder2Instruction(
@@ -154,7 +188,7 @@ export class mangoPerpMarketMaker {
             this.mangoGroup.publicKey,
             this.mangoAccount.publicKey,
             this.solAccount.publicKey,
-            this.mangoGroup.publicKey,
+            this.mangoGroup.mangoCache,
             this.perpMarket.publicKey,
             this.perpMarket.bids,
             this.perpMarket.asks,
@@ -162,16 +196,19 @@ export class mangoPerpMarketMaker {
             this.mangoAccount.getOpenOrdersKeysInBasketPacked(),
             nativeAskPrice,
             nativeAskQuantity,
-            I64_MAX_BN,
-            new BN(0),
-            'sell',
-            new BN(20),
+            I64_MAX_BN, //max base quantity
+            new BN(0), //max quote quantity
+            side,
+            new BN(this.bundleIdSeqNum),
             'postOnly',
             false,
         );
     }
 
-    gogo() {
-        
+
+    async gogo() {
+        const buyOrders = [];
+        const sellOrders = [[21.50, .1], [21.50, .1]];
+        await this.executeOrders(buyOrders, sellOrders);
     }
 }
