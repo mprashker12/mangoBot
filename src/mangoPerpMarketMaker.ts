@@ -44,6 +44,7 @@ import {
     mean,
     std,
 } from './utils';
+import { NumericLiteral } from 'typescript';
 
  //improved design to batch together many buy and sell instructions into a single
  //solana transaction. 
@@ -70,12 +71,19 @@ export class mangoPerpMarketMaker {
     fillsDuringCurrentRound : ParsedFillEvent[];
     pricesDuringCurrentRound : number[];
     fillHistory : ParsedFillEvent[][];
-    priceHistory : number[][];
+    ourFilledOrders : ParsedFillEvent[];
+    priceHistory : number[][]; //map a round to list of prices seen during round
+    priceAverages : number[];
+    
 
     //state vars to market make well
     overallLongPosition : number;
     overallShortPosition : number;
-    spread : 0;
+    spread : number;
+    stagger_size: number;
+    buy_order_size: number;
+    sell_order_size: number;
+    order_size_increment: number;
 
     constructor(
         symbol : string,
@@ -115,9 +123,19 @@ export class mangoPerpMarketMaker {
         this.fillHistory = [];
         this.pricesDuringCurrentRound = [];
         this.priceHistory = [];
+        this.ourFilledOrders = [];
+        this.priceAverages = [];
         this.bundleIdSeqNum = new BN(0); 
         this.orderBookFillSeqNum = new BN(0);
         this.secondBetweenBundleSends = 20;
+        
+        this.overallShortPosition = 0;
+        this.overallLongPosition = 0;
+        this.stagger_size = 5;
+        this.buy_order_size = .2;
+        this.sell_order_size = .2;
+        this.order_size_increment = .01;
+        this.spread = .05;
     }
 
     listenPyth() {
@@ -146,19 +164,25 @@ export class mangoPerpMarketMaker {
                 .map((e) => this.perpMarket.parseFillEvent(e) as ParsedFillEvent);
             
             for(const fill of fills) {
-                console.log(
-                    "fill for ", 
-                    fill.price, 
-                    fill.quantity, 
-                    fill.seqNum.toNumber(),
-                    fill.maker.toBase58(),
-                );
+                if(fill.maker.toString() === this.mangoAccount.publicKey.toString()) {
+                    console.log(
+                        "OUR ORDER WAS FILLED", 
+                        fill.price,
+                        fill.quantity
+                    )
+                    if(fill.takerSide === 'sell') {
+                        this.overallLongPosition += fill.price*fill.quantity;
+                    }
+                    if(fill.takerSide === 'buy') {
+                        this.overallShortPosition += fill.price*fill.quantity;
+                    }
+                    this.ourFilledOrders.push(fill);
+                }
                 this.fillsDuringCurrentRound.push(fill);
                 this.orderBookFillSeqNum = BN.max(this.orderBookFillSeqNum, fill.seqNum);
             }
         })
     }
-    
 
     //elems of buyOrders, sellOrders === (price, size)
     async executeBundle(buyOrders : number[][], sellOrders : number[][]) {
@@ -248,7 +272,7 @@ export class mangoPerpMarketMaker {
             this.solAccount,
             []
         ).then((res) => {
-            console.log("Sucessfully sent clean up Transaction");
+            console.log("Successfully sent clean up Transaction");
             success = true;
         }).catch((err) => {
             console.log("Failed to send clean up Transaction");
@@ -258,25 +282,75 @@ export class mangoPerpMarketMaker {
     }
 
     updateMakerState() {
-
         //update spread and other maker vars
-        console.log(this.bundleIdSeqNum);
+        for(var i = 0; i < this.fillsDuringCurrentRound.length; i++) {
+            const fill : ParsedFillEvent = this.fillsDuringCurrentRound[i];
+            if(fill.takerSide == "buy") {
+                //we, the maker, sold
+                this.overallShortPosition += fill.price*fill.quantity;
+            } else {
+                //we, the maker, bought
+                this.overallLongPosition += fill.price*fill.quantity;
+            }
+        }
+
+        if(this.overallLongPosition > this.overallShortPosition) {
+            this.buy_order_size -= this.order_size_increment;
+            if(this.buy_order_size < 0) {this.buy_order_size = 0;}
+        }
+
+        if(this.overallShortPosition > this.overallLongPosition) {
+            this.sell_order_size -= this.order_size_increment;
+            if(this.sell_order_size < 0) {this.sell_order_size = 0;}
+        }
+
+        const previousMean = this.priceAverages[this.bundleIdSeqNum.toNumber() - 1];
+        const currentMean = mean(this.pricesDuringCurrentRound);
+        const meanDiff = currentMean - previousMean;
+        const currentStd = mean(this.pricesDuringCurrentRound);
+        if(currentStd > 0 && meanDiff/currentStd < this.spread) {
+            this.spread -= meanDiff/2*currentStd;
+        }
+
+        //start new round
+
+        console.log("Starting Round", this.bundleIdSeqNum.toString());
         if(this.pricesDuringCurrentRound.length > 0) {
             console.log("Average price during previous round:", mean(this.pricesDuringCurrentRound));
             console.log("Standard Deviation of prices during previous round:", std(this.pricesDuringCurrentRound));
         } else {
-            console.log("Did not see any previous during round");
+            console.log("Did not see any prices previous during round");
         }
     }
 
 
-    calculateOrdersToMake() : number[][][] {
-        //use state to make buy and sell orders. 
-        
-        //simplest possible strategy
-        const buys = [[this.lastestPythPrice - .1, .5]];
-        const sells = [[this.lastestPythPrice + .1, .5]];
+    async calculateOrdersToMake() : Promise<number[][][]> {
 
+        if(this.bundleIdSeqNum.toNumber() === 0 
+            || this.priceHistory[this.bundleIdSeqNum.toNumber() - 1].length == 0) {
+            //first orders to execute
+            const buys = [[this.lastestPythPrice - .05, .2]];
+            const sells = [[this.lastestPythPrice + .05, .2]];
+            return [buys, sells];
+        }
+
+        //TODO: incorporate outstanding bids and ask into decision-making
+        // const asks = await this.perpMarket.loadAsks(
+        //     this.connection,
+        // );
+        // const bids = await this.perpMarket.loadBids(
+        //     this.connection,
+        // );
+        
+        let buys = []
+        let sells = []
+
+        //stagger buys and sells around predicted spot price by calculated spread amount
+        for(var i = 0; i < this.stagger_size; i++) {
+            buys.push([this.lastestPythPrice - this.spread*i, this.buy_order_size]);
+            sells.push([this.lastestPythPrice + this.spread*i, this.sell_order_size]);
+        }
+        
         return [buys, sells];
     }
 
@@ -299,17 +373,20 @@ export class mangoPerpMarketMaker {
 
         for(let i = 0; i < numRounds; i++) {
             //act on current state
-            const [buyOrders, sellOrders] = this.calculateOrdersToMake();
-            await this.executeBundle(buyOrders, sellOrders);
-            await delay(this.secondBetweenBundleSends*1000);
             this.updateMakerState();
+            const [buyOrders, sellOrders] = await this.calculateOrdersToMake();
+            await this.executeBundle(buyOrders, sellOrders);
             
-            //prepare for next round
+            //prepare for next state
             this.fillHistory.push(this.fillsDuringCurrentRound);
             this.priceHistory.push(this.pricesDuringCurrentRound);
+            if(this.pricesDuringCurrentRound.length > 0) {
+                this.priceAverages.push(mean(this.pricesDuringCurrentRound));
+            }
             this.fillsDuringCurrentRound = [];
             this.pricesDuringCurrentRound = [];
             this.bundleIdSeqNum = this.bundleIdSeqNum.add(new BN(1));
+            await delay(this.secondBetweenBundleSends*1000);
         }
 
         while(!(await this.cleanUp())) {
@@ -317,6 +394,8 @@ export class mangoPerpMarketMaker {
         }
 
         console.log("Done!")
+        console.log("Overall Long Position:", this.overallLongPosition);
+        console.log("Overall Short Position", this.overallShortPosition);
         process.exit(0);
     }
 }

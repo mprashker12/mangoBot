@@ -158,9 +158,9 @@ async function loadMangoPerpMarket(
       mangoAccount,
       mangoCache,
     );
-
+    //perpMarketMaker.calculateOrdersToMake();
     perpMarketMaker.gogo(5);
  }
 
-const symbol = "AVAX";
+const symbol = "SOL";
 makePerp(symbol);
